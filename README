@@ -1,0 +1,18 @@
+Select To Speak
+================================================================================
+Select To Speak reads selected text on a webpage. Simply click and drag your mouse over a portion of a webpage. After selecting, tap the Control key to hear the text read aloud with text to speech.
+
+
+Installation
+================================================================================
+- go to chrome://extensions
+- click the "Load unpacked extension" button.
+- navigate to the directory containing this file.
+- click ok.
+
+Features
+================================================================================
+- make a selection with the mouse (or keyboard) and tap to read
+- mouse the mouse around the page and hear the type of item under your mouse
+
+
