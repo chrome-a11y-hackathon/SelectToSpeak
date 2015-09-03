@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Select To Sepak",
+  "version": "1",
+  "description": "Select to speak",
+  "background": {
+    "page": "background.html"
+  },
+  "content_scripts": [{
+    "js": ["content.js"],
+    "matches": ["<all_urls>"]
+  }],
+  "permissions": [
+    "tabs",
+    "tts",
+    "<all_urls>"
+  ],
+  "automation": {"interact": true}
+}

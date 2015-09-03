@@ -1,0 +1,161 @@
+diff --git a/chrome/browser/extensions/api/automation_internal/automation_action_adapter.h b/chrome/browser/extensions/api/automation_internal/automation_action_adapter.h
+index 1bb98bc..3aa8a37 100644
+--- a/chrome/browser/extensions/api/automation_internal/automation_action_adapter.h
++++ b/chrome/browser/extensions/api/automation_internal/automation_action_adapter.h
+@@ -28,6 +28,9 @@ class AutomationActionAdapter {
+ 
+   // Shows the context menu resulting from a right click.
+   virtual void ShowContextMenu(int32 id) = 0;
++
++  // Triggers a hit test on the location resulting in a hover event.
++  virtual void HitTest(gfx::Point pt) = 0;
+ };
+ 
+ }  // namespace extensions
+diff --git a/chrome/browser/extensions/api/automation_internal/automation_internal_api.cc b/chrome/browser/extensions/api/automation_internal/automation_internal_api.cc
+index dc10f2c..2daad91 100644
+--- a/chrome/browser/extensions/api/automation_internal/automation_internal_api.cc
++++ b/chrome/browser/extensions/api/automation_internal/automation_internal_api.cc
+@@ -177,6 +177,8 @@ class RenderFrameHostActionAdapter : public AutomationActionAdapter {
+     rfh_->AccessibilityShowContextMenu(id);
+   }
+ 
++  void HitTest(gfx::Point pt) override { rfh_->AccessibilityHitTest(pt); }
++
+  private:
+   content::RenderFrameHost* rfh_;
+ 
+@@ -354,6 +356,15 @@ AutomationInternalPerformActionFunction::RouteActionToAdapter(
+     case api::automation_internal::ACTION_TYPE_MAKEVISIBLE:
+       adapter->MakeVisible(automation_id);
+       break;
++    case api::automation_internal::ACTION_TYPE_HITTEST: {
++      api::automation_internal::HitTestParams hit_test_params;
++      EXTENSION_FUNCTION_VALIDATE(
++          api::automation_internal::HitTestParams::Populate(
++              params->opt_args.additional_properties, &hit_test_params));
++      adapter->HitTest(gfx::Point(hit_test_params.x, hit_test_params.y));
++      break;
++    }
++
+     case api::automation_internal::ACTION_TYPE_SETSELECTION: {
+       api::automation_internal::SetSelectionParams selection_params;
+       EXTENSION_FUNCTION_VALIDATE(
+diff --git a/chrome/common/extensions/api/automation.idl b/chrome/common/extensions/api/automation.idl
+index b49c3a5..e1bc834 100644
+--- a/chrome/common/extensions/api/automation.idl
++++ b/chrome/common/extensions/api/automation.idl
+@@ -494,6 +494,9 @@
+     // Sets selection within a text field.
+     static void setSelection(long startIndex, long endIndex);
+ 
++    // Hit test.
++    static void hitTest(long x, long y);
++
+     // Adds a listener for the given event type and event phase.
+     static void addEventListener(
+         EventType eventType, AutomationListener listener, boolean capture);
+diff --git a/chrome/common/extensions/api/automation_internal.idl b/chrome/common/extensions/api/automation_internal.idl
+index 6f568cf..e66683f 100644
+--- a/chrome/common/extensions/api/automation_internal.idl
++++ b/chrome/common/extensions/api/automation_internal.idl
+@@ -24,6 +24,7 @@ namespace automationInternal {
+   enum ActionType {
+     focus,
+     doDefault,
++    hitTest,
+     makeVisible,
+     setSelection,
+     showContextMenu
+@@ -42,6 +43,13 @@ namespace automationInternal {
+     long endIndex;
+   };
+ 
++  // Arguments for the hitTest action supplied to performAction.
++  dictionary HitTestParams {
++    long x;
++    long y;
++  };
++
++
+   // Arguments for the querySelector function.
+   dictionary QuerySelectorRequiredParams {
+     long treeID;
+diff --git a/chrome/renderer/resources/extensions/automation/automation_node.js b/chrome/renderer/resources/extensions/automation/automation_node.js
+index 1598c6f..57b5bcc 100644
+--- a/chrome/renderer/resources/extensions/automation/automation_node.js
++++ b/chrome/renderer/resources/extensions/automation/automation_node.js
+@@ -239,6 +239,10 @@ AutomationNodeImpl.prototype = {
+     this.performAction_('focus');
+   },
+ 
++  hitTest: function(x, y) {
++    this.performAction_('hitTest', {x:x, y:y});
++  },
++
+   makeVisible: function() {
+     this.performAction_('makeVisible');
+   },
+@@ -827,6 +831,7 @@ var AutomationNode = utils.expose('AutomationNode',
+                                                 'find',
+                                                 'findAll',
+                                                 'focus',
++                                                'hitTest',
+                                                 'makeVisible',
+                                                 'matches',
+                                                 'setSelection',
+diff --git a/content/public/browser/render_frame_host.h b/content/public/browser/render_frame_host.h
+index 0424979..c7c4177 100644
+--- a/content/public/browser/render_frame_host.h
++++ b/content/public/browser/render_frame_host.h
+@@ -115,6 +115,7 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
+   virtual void AccessibilityShowContextMenu(int acc_obj_id) = 0;
+   virtual void AccessibilitySetTextSelection(
+       int acc_obj_id, int start_offset, int end_offset) = 0;
++  virtual void AccessibilityHitTest(const gfx::Point& pt) = 0;
+ 
+   // This is called when the user has committed to the given find in page
+   // request (e.g. by pressing enter or by clicking on the next / previous
+diff --git a/content/renderer/accessibility/renderer_accessibility.cc b/content/renderer/accessibility/renderer_accessibility.cc
+index 5846b9a..158eec6 100644
+--- a/content/renderer/accessibility/renderer_accessibility.cc
++++ b/content/renderer/accessibility/renderer_accessibility.cc
+@@ -358,15 +358,18 @@ void RendererAccessibility::OnFatalError() {
+ 
+ void RendererAccessibility::OnHitTest(gfx::Point point) {
+   const WebDocument& document = GetMainDocument();
+-  if (document.isNull())
++  if (document.isNull()) {
+     return;
++  }
+   WebAXObject root_obj = document.accessibilityObject();
+-  if (!root_obj.updateLayoutAndCheckValidity())
++  if (!root_obj.updateLayoutAndCheckValidity()) {
+     return;
++  }
+ 
+   WebAXObject obj = root_obj.hitTest(point);
+-  if (!obj.isDetached())
++  if (!obj.isDetached()) {
+     HandleAXEvent(obj, ui::AX_EVENT_HOVER);
++  } else
+ }
+ 
+ void RendererAccessibility::OnSetAccessibilityFocus(int acc_obj_id) {
+diff --git a/ui/views/view.cc b/ui/views/view.cc
+index 3c2aed7..3de1ca1 100644
+--- a/ui/views/view.cc
++++ b/
+@@ -987,8 +987,11 @@ void View::OnMouseEvent(ui::MouseEvent* event) {
+       break;
+ 
+     case ui::ET_MOUSE_ENTERED:
+-      if (event->flags() & ui::EF_TOUCH_ACCESSIBILITY)
++      LOG(ERROR) << "mouse e!";
++      if (event->flags()) {
++        LOG(ERROR) << "mouse enter!";
+         NotifyAccessibilityEvent(ui::AX_EVENT_HOVER, true);
++      }
+       OnMouseEntered(*event);
+       break;
+ 
