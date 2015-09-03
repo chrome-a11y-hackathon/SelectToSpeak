@@ -3,7 +3,7 @@
 /**
  * Select to Speak.
  */
-console.log('hi!');
+
 class SelectToSpeak {
   constructor() {
     chrome.tts.speak('select to speak!');
